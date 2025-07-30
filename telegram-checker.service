@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram Checker API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/telegram-checker
+Environment=PATH=/root/telegram-checker/venv/bin
+ExecStart=/root/telegram-checker/venv/bin/python /root/telegram-checker/flask_api_fast.py
+Restart=always
+RestartSec=10
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target 

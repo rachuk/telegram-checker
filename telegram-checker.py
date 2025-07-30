@@ -163,6 +163,10 @@ class TelegramChecker:
     def __init__(self):
         self.config = self.load_config()
         self.client = None
+        self.request_count = 0
+        self.last_request_time = 0
+        self.base_delay = 2  # Base delay in seconds
+        self.max_delay = 8   # Maximum delay in seconds
         PROFILE_PHOTOS_DIR.mkdir(exist_ok=True)
         RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -177,6 +181,29 @@ class TelegramChecker:
 
     def save_config(self):
         with open(CONFIG_FILE, 'wb') as f: pickle.dump(self.config, f)
+
+    def calculate_adaptive_delay(self) -> float:
+        """Calculate random delay between min and max values"""
+        import time
+        import random
+        
+        current_time = time.time()
+        
+        # Increment request count
+        self.request_count += 1
+        
+        # Calculate time since last request
+        time_since_last = current_time - self.last_request_time if self.last_request_time > 0 else 0
+        self.last_request_time = current_time
+        
+        # Random delay between base_delay and max_delay
+        delay = random.uniform(self.base_delay, self.max_delay)
+        
+        # Reset counter every hour
+        if time_since_last > 3600:  # 1 hour
+            self.request_count = 0
+        
+        return delay
 
     async def initialize(self):
         if not self.config.get('api_id'):
@@ -218,7 +245,7 @@ class TelegramChecker:
             try:
                 user = await self.client.get_entity(phone)
                 telegram_user = await TelegramUser.from_user(self.client, user, phone)
-                await self.download_all_profile_photos(user, telegram_user)
+                # await self.download_all_profile_photos(user, telegram_user)  # Disabled to reduce API calls
                 return telegram_user
             except:
                 contact = types.InputPhoneContact(client_id=0, phone=phone, first_name="Test", last_name="User")
@@ -231,7 +258,7 @@ class TelegramChecker:
                     full_user = await self.client.get_entity(user.id)
                     await self.client(DeleteContactsRequest(id=[user.id]))
                     telegram_user = await TelegramUser.from_user(self.client, full_user, phone)
-                    await self.download_all_profile_photos(full_user, telegram_user)
+                    # await self.download_all_profile_photos(full_user, telegram_user)  # Disabled to reduce API calls
                     return telegram_user
                 finally:
                     try:
@@ -248,7 +275,7 @@ class TelegramChecker:
             user = await self.client.get_entity(username)
             if not isinstance(user, types.User): return None
             telegram_user = await TelegramUser.from_user(self.client, user, "")
-            await self.download_all_profile_photos(user, telegram_user)
+            # await self.download_all_profile_photos(user, telegram_user)  # Disabled to reduce API calls
             return telegram_user
         except ValueError as e:
             logger.error(f"Invalid username {username}: {str(e)}")
@@ -272,6 +299,13 @@ class TelegramChecker:
                 console.print(f"[cyan]Checking {phone} ({i}/{total_phones})[/cyan]")
                 user = await self.check_phone_number(phone)
                 results[phone] = asdict(user) if user else {"error": "No Telegram account found"}
+                
+                # Adaptive delay based on request count
+                if i < total_phones:  # Don't delay after last request
+                    delay = self.calculate_adaptive_delay()
+                    console.print(f"[yellow]Waiting {delay}s before next request...[/yellow]")
+                    await asyncio.sleep(delay)
+                    
             except ValueError as e:
                 results[phone] = {"error": str(e)}
             except Exception as e:
@@ -290,6 +324,13 @@ class TelegramChecker:
                 console.print(f"[cyan]Checking {username} ({i}/{total_usernames})[/cyan]")
                 user = await self.check_username(username)
                 results[username] = asdict(user) if user else {"error": "No Telegram account found"}
+                
+                # Adaptive delay based on request count
+                if i < total_usernames:  # Don't delay after last request
+                    delay = self.calculate_adaptive_delay() * 0.5  # Usernames need less delay
+                    console.print(f"[yellow]Waiting {delay:.1f}s before next request...[/yellow]")
+                    await asyncio.sleep(delay)
+                    
             except ValueError as e:
                 results[username] = {"error": str(e)}
             except Exception as e:

@@ -4,3 +4,4 @@ asyncio
 click
 pathlib
 python-dotenv
+flask

@@ -37,4 +37,18 @@ wheels/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Telegram session files
+*.session
+*.session-journal
+
+# Logs
+*.log
+
+# Config files
+config.pkl
+
+# Results and photos
+results/
+profile_photos/ 
