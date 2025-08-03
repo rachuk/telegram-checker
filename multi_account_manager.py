@@ -17,6 +17,15 @@ from telethon.tl import types
 from telethon.tl.functions.contacts import ImportContactsRequest, DeleteContactsRequest
 from telethon.tl.functions.users import GetFullUserRequest
 
+# Импортируем систему уведомлений
+try:
+    from telegram_notifications import notifier, check_system_status
+    NOTIFICATIONS_ENABLED = True
+except ImportError:
+    NOTIFICATIONS_ENABLED = False
+    notifier = None
+    check_system_status = None
+
 # Импортируем функции из основного модуля
 import importlib.util
 spec = importlib.util.spec_from_file_location("telegram_checker", "telegram-checker.py")
@@ -213,6 +222,14 @@ class MultiAccountManager:
                 
                 return selected
         
+        # Проверяем статус системы и отправляем уведомления при проблемах
+        if NOTIFICATIONS_ENABLED and check_system_status:
+            try:
+                status_data = self.get_status()
+                check_system_status(status_data)
+            except Exception as e:
+                logger.error(f"Error checking system status: {e}")
+        
         return None
     
     def release_account(self, account_name: str):
@@ -235,6 +252,24 @@ class MultiAccountManager:
                         wait_time = int(str(error).split('A wait of ')[1].split(' seconds')[0])
                         account.flood_wait_until = time.time() + wait_time + 60  # +60 для безопасности
                         logger.warning(f"Account {account_name} got FloodWait for {wait_time} seconds")
+                        
+                        # Отправляем детальное уведомление о FloodWait
+                        if NOTIFICATIONS_ENABLED and notifier:
+                            # Получаем статистику аккаунта
+                            requests_this_hour = account.current_requests
+                            max_requests = account.max_requests_per_hour
+                            errors_count = account.errors_count
+                            last_used_time = datetime.fromtimestamp(account.last_used).strftime('%H:%M:%S')
+                            
+                            message = f"🔴 <b>FLOODWAIT БЛОКИРОВКА</b>\n\n"
+                            message += f"📱 Аккаунт: {account_name}\n"
+                            message += f"⏳ Время блокировки: {wait_time} сек\n"
+                            message += f"📊 Запросов в этом часе: {requests_this_hour}/{max_requests}\n"
+                            message += f"❌ Всего ошибок: {errors_count}\n"
+                            message += f"🕐 Последний запрос: {last_used_time}\n"
+                            message += f"📈 Использование: {requests_this_hour/max_requests*100:.1f}%"
+                            
+                            notifier.send_warning_alert(message)
                     except:
                         account.flood_wait_until = time.time() + 3600  # 1 час по умолчанию
                 
@@ -242,6 +277,10 @@ class MultiAccountManager:
                 if account.errors_count > 20:  # Увеличиваем лимит ошибок
                     account.enabled = False
                     logger.warning(f"Account {account_name} disabled due to too many errors")
+                    
+                    # Отправляем уведомление о критической ошибке
+                    if NOTIFICATIONS_ENABLED and notifier:
+                        notifier.send_critical_alert(f"❌ Аккаунт {account_name} отключен из-за {account.errors_count} ошибок")
     
     async def check_phone_with_account(self, account_name: str, phone: str) -> Optional[TelegramUser]:
         """Проверяет номер телефона с конкретным аккаунтом"""
