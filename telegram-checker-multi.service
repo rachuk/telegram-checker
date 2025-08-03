@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram Checker Multi-Account API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/telegram-checker
+Environment=PATH=/root/telegram-checker/venv/bin
+ExecStart=/root/telegram-checker/venv/bin/python flask_api_multi.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target 
