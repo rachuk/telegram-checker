@@ -98,9 +98,13 @@ def check_system_status(health_data: dict) -> None:
         if account_data.get("enabled"):
             total_enabled += 1
             
-            if account_data.get("ready") and account_data.get("flood_wait_until", 0) <= 0:
+            # Проверяем, истекло ли время FloodWait
+            flood_wait_until = account_data.get("flood_wait_until", 0)
+            current_time = time.time()
+            
+            if account_data.get("ready") and flood_wait_until <= current_time:
                 available_accounts += 1
-            elif account_data.get("flood_wait_until", 0) > 0:
+            elif flood_wait_until > current_time:
                 flood_wait_accounts.append(account_name)
             
             if account_data.get("errors_count", 0) > 5:
@@ -170,10 +174,14 @@ def send_periodic_report(health_data: dict) -> None:
             total_requests += requests_count
             total_errors += errors_count
             
-            if account_data.get("ready") and account_data.get("flood_wait_until", 0) <= 0:
+            # Проверяем, истекло ли время FloodWait
+            flood_wait_until = account_data.get("flood_wait_until", 0)
+            current_time = time.time()
+            
+            if account_data.get("ready") and flood_wait_until <= current_time:
                 available_accounts += 1
                 status = "✅"
-            elif account_data.get("flood_wait_until", 0) > 0:
+            elif flood_wait_until > current_time:
                 flood_wait_accounts += 1
                 status = "🔴"
             else:

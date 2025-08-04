@@ -324,7 +324,7 @@ class MultiAccountManager:
                 logger.info(f"Phone {phone}: No user found (normal)")
                 return None
             else:
-                # Это реальная ошибка
+                # Это реальная ошибка - ВСЕГДА помечаем как ошибку аккаунта
                 self.mark_account_error(account_name, e)
                 logger.error(f"Error checking phone {phone} with account {account_name}: {e}")
                 return None
@@ -365,7 +365,7 @@ class MultiAccountManager:
                 logger.info(f"Username {username}: No user found (normal)")
                 return None
             else:
-                # Это реальная ошибка
+                # Это реальная ошибка - ВСЕГДА помечаем как ошибку аккаунта
                 self.mark_account_error(account_name, e)
                 logger.error(f"Error checking username {username} with account {account_name}: {e}")
                 return None
@@ -375,7 +375,7 @@ class MultiAccountManager:
         logger.info(f"Starting batch processing of {len(phones)} phones: {phones}")
         results = {}
         
-        # Создаем задачи для параллельной обработки
+        # Создаем задачи для параллельной обработки с увеличенными задержками
         tasks = []
         for phone in phones:
             task = asyncio.create_task(self._process_single_phone(phone))
@@ -391,7 +391,11 @@ class MultiAccountManager:
             else:
                 results[phones[i]] = result
         
-        logger.info(f"Completed batch processing of {len(phones)} phones")
+        # Добавляем задержку после завершения батча
+        batch_delay = random.uniform(8, 15)  # 8-15 секунд между батчами
+        logger.info(f"Completed batch processing of {len(phones)} phones, waiting {batch_delay:.1f}s before next batch")
+        await asyncio.sleep(batch_delay)
+        
         return results
     
     async def _process_single_phone(self, phone: str) -> Dict[str, Any]:
@@ -407,7 +411,7 @@ class MultiAccountManager:
                 continue
             
             # Добавляем случайную задержку для избежания блокировок
-            delay = random.uniform(2, 4)  # Увеличиваем задержки для безопасности
+            delay = random.uniform(4, 8)  # Увеличиваем задержки для безопасности
             logger.info(f"Phone {phone}: Using account {account_name}, delay {delay:.1f}s")
             await asyncio.sleep(delay)
             
@@ -436,11 +440,11 @@ class MultiAccountManager:
         logger.info(f"Starting batch processing of {len(usernames)} usernames: {usernames}")
         results = {}
         
-        # Создаем задачи для параллельной обработки с случайными задержками старта
+        # Создаем задачи для параллельной обработки с увеличенными задержками
         tasks = []
         for username in usernames:
             # Добавляем случайную задержку старта для естественности
-            start_delay = random.uniform(0.5, 3.0)
+            start_delay = random.uniform(1.0, 5.0)  # Увеличиваем задержку старта
             task = asyncio.create_task(self._process_single_username_with_delay(username, start_delay))
             tasks.append(task)
         
@@ -454,7 +458,11 @@ class MultiAccountManager:
             else:
                 results[usernames[i]] = result
         
-        logger.info(f"Completed batch processing of {len(usernames)} usernames")
+        # Добавляем задержку после завершения батча
+        batch_delay = random.uniform(8, 15)  # 8-15 секунд между батчами
+        logger.info(f"Completed batch processing of {len(usernames)} usernames, waiting {batch_delay:.1f}s before next batch")
+        await asyncio.sleep(batch_delay)
+        
         return results
     
     async def _process_single_username_with_delay(self, username: str, start_delay: float) -> Dict[str, Any]:
@@ -478,7 +486,7 @@ class MultiAccountManager:
                 continue
             
             # Добавляем случайную задержку для избежания блокировок
-            delay = random.uniform(2, 4)  # Увеличиваем задержки для безопасности
+            delay = random.uniform(4, 8)  # Увеличиваем задержки для безопасности
             logger.info(f"Username {username}: Using account {account_name}, delay {delay:.1f}s")
             await asyncio.sleep(delay)
             

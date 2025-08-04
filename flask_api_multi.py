@@ -10,6 +10,15 @@ import logging
 
 from multi_account_manager import MultiAccountManager
 
+# Импортируем систему уведомлений
+try:
+    from telegram_notifications import notifier, check_system_status
+    NOTIFICATIONS_ENABLED = True
+except ImportError:
+    NOTIFICATIONS_ENABLED = False
+    notifier = None
+    check_system_status = None
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -30,10 +39,12 @@ manager_ready = False
 request_queue = queue.Queue()
 response_queues = {}
 worker_thread = None
+last_monitoring_check = 0
+monitoring_interval = 60  # Проверяем каждую минуту
 
 def telegram_worker():
     """Background worker that maintains persistent Telegram connections"""
-    global account_manager, manager_ready
+    global account_manager, manager_ready, last_monitoring_check
     
     async def init_manager():
         global account_manager, manager_ready
@@ -42,13 +53,40 @@ def telegram_worker():
             await account_manager.initialize_all_clients()
             manager_ready = True
             logger.info("Multi-account manager initialized and ready")
+            
+            # Отправляем уведомление о запуске
+            if NOTIFICATIONS_ENABLED and notifier:
+                notifier.send_success_alert("🚀 Система Telegram Checker запущена и готова к работе")
+                
         except Exception as e:
             logger.error(f"Failed to initialize multi-account manager: {e}")
             manager_ready = False
+            
+            # Отправляем уведомление об ошибке запуска
+            if NOTIFICATIONS_ENABLED and notifier:
+                notifier.send_critical_alert(f"❌ Ошибка запуска системы: {str(e)}")
+    
+    async def check_system_monitoring():
+        """Проверяет статус системы и отправляет уведомления"""
+        global last_monitoring_check
+        
+        current_time = time.time()
+        if current_time - last_monitoring_check >= monitoring_interval:
+            last_monitoring_check = current_time
+            
+            if account_manager and NOTIFICATIONS_ENABLED and check_system_status:
+                try:
+                    status_data = account_manager.get_status()
+                    check_system_status(status_data)
+                except Exception as e:
+                    logger.error(f"Error in system monitoring: {e}")
     
     async def process_requests():
         while True:
             try:
+                # Проверяем мониторинг
+                await check_system_monitoring()
+                
                 # Get request from queue
                 if not request_queue.empty():
                     request_id, phones, usernames = request_queue.get()
@@ -74,6 +112,11 @@ def telegram_worker():
                 
             except Exception as e:
                 logger.error(f"Error in process_requests: {e}")
+                
+                # Отправляем уведомление об ошибке
+                if NOTIFICATIONS_ENABLED and notifier:
+                    notifier.send_warning_alert(f"⚠️ Ошибка в обработке запросов: {str(e)}")
+                
                 await asyncio.sleep(1)
     
     # Run the async functions
@@ -157,16 +200,29 @@ def check_usernames():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    status = {
-        "status": "ok" if manager_ready else "initializing",
-        "message": "Multi-account API is running",
-        "manager_ready": manager_ready
-    }
+    """Health check endpoint"""
+    global account_manager, manager_ready
     
-    if manager_ready and account_manager:
-        status.update(account_manager.get_status())
+    # Проверяем мониторинг при каждом health check
+    if account_manager and NOTIFICATIONS_ENABLED and check_system_status:
+        try:
+            status_data = account_manager.get_status()
+            check_system_status(status_data)
+        except Exception as e:
+            logger.error(f"Error in health check monitoring: {e}")
     
-    return jsonify(status)
+    if not manager_ready:
+        return jsonify({
+            "status": "error",
+            "message": "Telegram manager not ready",
+            "telegram_ready": False
+        }), 503
+    
+    return jsonify({
+        "status": "ok",
+        "message": "API is running",
+        "telegram_ready": manager_ready
+    })
 
 @app.route('/accounts/status', methods=['GET'])
 def accounts_status():
@@ -299,6 +355,86 @@ def batch_check():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/monitoring/check', methods=['POST'])
+def force_monitoring_check():
+    """Принудительная проверка статуса системы"""
+    global account_manager
+    
+    if not account_manager:
+        return jsonify({
+            "status": "error",
+            "message": "Account manager not initialized"
+        }), 503
+    
+    try:
+        status_data = account_manager.get_status()
+        
+        if NOTIFICATIONS_ENABLED and check_system_status:
+            check_system_status(status_data)
+        
+        return jsonify({
+            "status": "ok",
+            "message": "Monitoring check completed",
+            "data": status_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in force monitoring check: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Monitoring check failed: {str(e)}"
+        }), 500
+
+@app.route('/monitoring/status', methods=['GET'])
+def get_monitoring_status():
+    """Получить текущий статус мониторинга"""
+    global account_manager, last_monitoring_check
+    
+    if not account_manager:
+        return jsonify({
+            "status": "error",
+            "message": "Account manager not initialized"
+        }), 503
+    
+    try:
+        status_data = account_manager.get_status()
+        
+        # Анализируем статус
+        total_enabled = 0
+        available_accounts = 0
+        flood_wait_accounts = []
+        
+        for account_name, account_data in status_data.get("accounts", {}).items():
+            if account_data.get("enabled"):
+                total_enabled += 1
+                
+                # Проверяем, истекло ли время FloodWait
+                flood_wait_until = account_data.get("flood_wait_until", 0)
+                current_time = time.time()
+                
+                if account_data.get("ready") and flood_wait_until <= current_time:
+                    available_accounts += 1
+                elif flood_wait_until > current_time:
+                    flood_wait_accounts.append(account_name)
+        
+        monitoring_status = {
+            "notifications_enabled": NOTIFICATIONS_ENABLED,
+            "last_check": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_monitoring_check)),
+            "total_enabled_accounts": total_enabled,
+            "available_accounts": available_accounts,
+            "flood_wait_accounts": flood_wait_accounts,
+            "system_status": "critical" if available_accounts == 0 else "warning" if flood_wait_accounts else "ok"
+        }
+        
+        return jsonify(monitoring_status)
+        
+    except Exception as e:
+        logger.error(f"Error getting monitoring status: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to get monitoring status: {str(e)}"
+        }), 500
 
 if __name__ == '__main__':
     print("Starting Multi-Account Telegram API...")
